@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 MQTT Dashboard</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --ok: #22c55e;
+      --err: #ef4444;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); padding: 20px; }
+    .container { max-width: 960px; margin: 0 auto; }
+    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge { padding: 6px 12px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; background: var(--card); border: 1px solid var(--border); }
+    .ok { color: var(--ok); border-color: var(--ok); }
+    .err { color: var(--err); border-color: var(--err); }
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .conn-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+    input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+    button { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border); background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
+    button:hover { opacity: 0.92; }
+    button.sec { background: var(--bg); color: var(--text); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .metric-val { font-size: 1.7rem; font-weight: 700; margin-top: 6px; }
+    .metric-sub { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+    .rgb-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.85rem; color: var(--muted); margin-top: 10px; }
+    pre { background: var(--bg); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; border: 1px solid var(--border); margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h2 style="margin:0;">Thermavisiona Sensor</h2>
+        <div style="font-size:0.85rem;color:var(--muted);">BME280, Baterai,Button & LED RGB via MQTT</div>
+      </div>
+      <div class="badges">
+        <span id="wsBadge" class="badge err">Broker: Terputus</span>
+        <span id="devBadge" class="badge err">Device: Offline</span>
+      </div>
+    </header>
+
+    <div class="panel">
+      <div class="conn-bar">
+        <div>
+          <label for="wsUrl">WebSocket URL Broker</label>
+          <input id="wsUrl" value="ws://192.168.137.1:9001" />
+        </div>
+        <div>
+          <label for="prefix">Topic Prefix</label>
+          <input id="prefix" value="node/bme_rgb_01" />
+        </div>
+        <div>
+          <label for="user">Username (opsional)</label>
+          <input id="user" placeholder="kosongkan jika anonim" />
+        </div>
+        <div>
+          <label for="pass">Password (opsional)</label>
+          <input id="pass" type="password" placeholder="opsional" />
+        </div>
+        <div>
+          <button id="btnConnect" onclick="connectMqtt()">Hubungkan</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <label>Suhu</label>
+        <div id="valSuhu" class="metric-val">-- °C</div>
+        <div id="valValid" class="metric-sub">Sensor: --</div>
+      </div>
+      <div class="panel">
+        <label>Kelembapan</label>
+        <div id="valLembap" class="metric-val">-- %RH</div>
+        <div id="valSiklus" class="metric-sub">Siklus: #0</div>
+      </div>
+      <div class="panel">
+        <label>Tekanan Udara</label>
+        <div id="valTekanan" class="metric-val">-- hPa</div>
+        <div id="valTombol" class="metric-sub">Tombol KEY1: --</div>
+      </div>
+      <div class="panel">
+        <label>Baterai</label>
+        <div id="valBateraiPct" class="metric-val">-- %</div>
+        <div id="valBateraiV" class="metric-sub">Tegangan: -- V</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div>
+          <strong>Kontrol LED RGB</strong>
+          <span style="color:var(--muted);font-size:0.85rem;">— Warna aktif: <strong id="valRgb">--</strong></span>
+        </div>
+        <button class="sec" onclick="sendRgbCommand('next')">Ganti Warna Berikutnya</button>
+      </div>
+      <div class="rgb-buttons" id="rgbButtons"></div>
+      <div class="meta">
+        <span>MAC ID: <strong id="valMac">--</strong></span>
+        <span>Update Terakhir: <strong id="valTime">--</strong></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <label>Payload Telemetri Terakhir</label>
+      <pre id="rawJson">Menunggu data...</pre>
+    </div>
+  </div>
+
+  <script>
+    const RGB_OPTIONS = ["Mati", "Merah", "Hijau", "Biru", "Kuning", "Cyan", "Ungu", "Putih"];
+    let client = null;
+
+    const btnContainer = document.getElementById("rgbButtons");
+    RGB_OPTIONS.forEach(name => {
+      const btn = document.createElement("button");
+      btn.className = "sec";
+      btn.textContent = name;
+      btn.onclick = () => sendRgbCommand(name);
+      btnContainer.appendChild(btn);
+    });
+
+    function getTopics() {
+      const p = document.getElementById("prefix").value.trim().replace(/\/+$/, "");
+      return {
+        telemetry: `${p}/telemetry`,
+        status: `${p}/status`,
+        rgbState: `${p}/rgb/state`,
+        rgbSet: `${p}/rgb/set`
+      };
+    }
+
+    function connectMqtt() {
+      const url = document.getElementById("wsUrl").value.trim();
+      const username = document.getElementById("user").value.trim();
+      const password = document.getElementById("pass").value;
+      const topics = getTopics();
+
+      if (client) {
+        client.end(true);
+      }
+
+      const opts = {
+        reconnectPeriod: 3000,
+        connectTimeout: 4000
+      };
+      if (username) {
+        opts.username = username;
+        opts.password = password;
+      }
+
+      const wsBadge = document.getElementById("wsBadge");
+      wsBadge.textContent = "Broker: Menghubungkan...";
+      wsBadge.className = "badge";
+
+      client = mqtt.connect(url, opts);
+
+      client.on("connect", () => {
+        wsBadge.textContent = "Broker: Terhubung";
+        wsBadge.className = "badge ok";
+        client.subscribe([topics.telemetry, topics.status, topics.rgbState], { qos: 1 });
+      });
+
+      client.on("offline", () => {
+        wsBadge.textContent = "Broker: Terputus";
+        wsBadge.className = "badge err";
+      });
+
+      client.on("error", () => {
+        wsBadge.textContent = "Broker: Error";
+        wsBadge.className = "badge err";
+      });
+
+      client.on("message", (topic, message) => {
+        const payloadStr = message.toString();
+        const t = getTopics();
+
+        if (topic === t.status) {
+          const isOnline = payloadStr.trim().toLowerCase() === "online";
+          const devBadge = document.getElementById("devBadge");
+          devBadge.textContent = `Device: ${isOnline ? "Online" : "Offline"}`;
+          devBadge.className = `badge ${isOnline ? "ok" : "err"}`;
+          return;
+        }
+
+        if (topic === t.rgbState) {
+          document.getElementById("valRgb").textContent = payloadStr.trim();
+          return;
+        }
+
+        if (topic === t.telemetry) {
+          document.getElementById("rawJson").textContent = payloadStr;
+          try {
+            const d = JSON.parse(payloadStr);
+            const ok = Number(d.valid) === 1;
+            document.getElementById("valSuhu").textContent = ok ? `${Number(d.suhu).toFixed(2)} °C` : "Gagal Baca";
+            document.getElementById("valLembap").textContent = ok ? `${Number(d.lembap).toFixed(2)} %RH` : "-- %RH";
+            document.getElementById("valTekanan").textContent = ok ? `${Number(d.tekanan).toFixed(2)} hPa` : "-- hPa";
+            document.getElementById("valValid").textContent = ok ? "Sensor: BME280 Valid" : "Sensor: Tidak Valid (valid=0)";
+            document.getElementById("valSiklus").textContent = `Siklus: #${d.siklus ?? "-"}`;
+            document.getElementById("valTombol").textContent = `Tombol KEY1: ${Number(d.tombol) === 1 ? "DITEKAN (1)" : "Lepas (0)"}`;
+            document.getElementById("valBateraiPct").textContent = `${Number(d.baterai_pct ?? 0).toFixed(1)} %`;
+            document.getElementById("valBateraiV").textContent = `Tegangan: ${Number(d.baterai ?? 0).toFixed(3)} V`;
+            if (d.rgb) document.getElementById("valRgb").textContent = d.rgb;
+            if (d.id) document.getElementById("valMac").textContent = d.id;
+            document.getElementById("valTime").textContent = new Date().toLocaleTimeString("id-ID");
+          } catch (e) {
+            console.error("JSON tidak valid:", e);
+          }
+        }
+      });
+    }
+
+    function sendRgbCommand(value) {
+      if (!client || !client.connected) {
+        alert("Hubungkan ke broker MQTT terlebih dahulu.");
+        return;
+      }
+      const t = getTopics();
+      client.publish(t.rgbSet, value, { qos: 1 });
+    }
+  </script>
+</body>
+</html>
